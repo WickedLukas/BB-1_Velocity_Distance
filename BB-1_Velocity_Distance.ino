@@ -26,26 +26,26 @@
 
 //volatile boolean M1_interrupt = false;
 //volatile boolean M2_interrupt = false;
+//volatile boolean timer = false;
 
 volatile int16_t enc_count_M1 = 0;
 volatile int16_t enc_count_M2 = 0;
 
-volatile int32_t front_echo_start;		// front echo start in microseconds
-volatile int32_t front_echo_end;		// front echo end in microseconds
-volatile int32_t front_echo_duration;	// front echo duration in microseconds
+volatile uint32_t front_echo_start;	// front echo start in microseconds
+volatile uint32_t front_echo_end;	// front echo end in microseconds
+volatile uint32_t front_echo_duration = 200000;	// front echo duration in microseconds
 
-volatile int32_t rear_echo_start;		// rear echo start in microseconds
-volatile int32_t rear_echo_end;			// rear echo end in microseconds
-volatile int32_t rear_echo_duration;	// rear echo duration in microseconds
-
-volatile boolean front_echo = false;
-volatile boolean rear_echo = false;
-volatile boolean timer = false;
+volatile uint32_t rear_echo_start;	// rear echo start in microseconds
+volatile uint32_t rear_echo_end;	// rear echo end in microseconds
+volatile uint32_t rear_echo_duration = 200000;	// rear echo duration in microseconds
 
 volatile uint16_t trigger_time_count = 0;	// counter for TRIGGER_TIME_INTERVAL
 volatile uint8_t state = 1;	// state variable
 
-byte message[4];
+volatile uint8_t front_distance;	// distance to obstacle front in centimeter
+volatile uint8_t rear_distance;		// distance to obstacle rear in centimeter
+
+byte message[6];
 
 // stores which combination of current and previous encoder state lead to an increase or decrease of the encoder count and which are not defined
 const int8_t lookup_table[] = {0, 0, 0, 0, 0, -1, 1, 0, 0, 1, -1, 0, 0, 0, 0, 0};
@@ -54,7 +54,7 @@ const int8_t lookup_table[] = {0, 0, 0, 0, 0, -1, 1, 0, 0, 1, -1, 0, 0, 0, 0, 0}
 // Debug output is now working even on ATMega328P MCUs (e.g. Arduino Uno)
 // after moving string constants to flash memory storage using the F()
 // compiler macro (Arduino IDE 1.0+ required).
-#define DEBUG
+//#define DEBUG
 
 #ifdef DEBUG
 #define DEBUG_PRINT(x) Serial.print(x)
@@ -71,18 +71,16 @@ void requestEvent() {
 	noInterrupts();
 	message[0] = (enc_count_M1 >> 8) & 0xFF;
 	message[1] = enc_count_M1 & 0xFF;
-	SREG = SREG_bak; 	//restore interrupt state
-	
-	SREG_bak = SREG;	//save global interrupt state
-	noInterrupts();
 	message[2] = (enc_count_M2 >> 8) & 0xFF;
 	message[3] = enc_count_M2 & 0xFF;
+	message[4] = front_distance;
+	message[5] = rear_distance;
 	SREG = SREG_bak; 	//restore interrupt state
-
+	
+	Wire.write(message, 6);
+	
 	enc_count_M1 = 0;
 	enc_count_M2 = 0;
-	
-	Wire.write(message, 4);
 }
 
 void encoder_isr_M1() {
@@ -123,7 +121,6 @@ ISR(PCINT0_vect) {
 		case LOW:	// echo pin change was a falling edge (end of echo pulse)
 			rear_echo_end = micros();
 			rear_echo_duration = rear_echo_end - rear_echo_start;	// calculate echo pulse duration
-			rear_echo = true;
 			break;
 	}
 }
@@ -136,7 +133,6 @@ ISR(PCINT2_vect) {
 		case LOW:	// echo pin change was a falling edge (end of echo pulse)
 			front_echo_end = micros();
 			front_echo_duration = front_echo_end - front_echo_start;	// calculate echo pulse duration
-			front_echo = true;
 			break;
 	}
 }
@@ -157,7 +153,7 @@ void timer_isr() {
 		case 2:		// finish trigger pulse
 			digitalWrite(HCSR04_TRIGGER_PIN, LOW);	// set trigger pin to low
 			state = 0;
-			timer = true;
+			//timer = true;
 			break;
 	}
 }
@@ -177,7 +173,7 @@ void setup() {
 	pinMode(2, INPUT);
 	pinMode(3, INPUT);
 	
-	attachInterrupt(digitalPinToInterrupt(2),encoder_isr_M2,CHANGE);
+	attachInterrupt(digitalPinToInterrupt(2),encoder_isr_M1,CHANGE);
 	attachInterrupt(digitalPinToInterrupt(3),encoder_isr_M2,CHANGE);
 	
 	pinMode(HCSR04_TRIGGER_PIN, OUTPUT);	// configure trigger pin as output
@@ -200,46 +196,23 @@ void setup() {
 }
 
 void loop() {
+	front_distance = constrain((int) (front_echo_duration * 0.01716 + 0.5), 0, 255);
+	rear_distance = constrain((int) (rear_echo_duration * 0.01716 + 0.5), 0, 255);
+	
 	/*if (M1_interrupt) {
-	DEBUG_PRINTLN(enc_count_M1 % 1000);
-	M1_interrupt = false;
+		DEBUG_PRINTLN(enc_count_M1 % 1000);
+		M1_interrupt = false;
 	}
 	
 	if (M2_interrupt) {
-	DEBUG_PRINT("\t"); DEBUG_PRINTLN(enc_count_M2 % 1000);
-	M2_interrupt = false;
-	}*/
-	
-	static float front_distance = 2000;	// distance to obstacle front in centimeter
-	static float rear_distance = 2000;	// distance to obstacle rear in centimeter
-	
-	if (front_echo) {
-		front_echo = false;
-		front_distance = front_echo_duration * 0.01716;
-	}
-	
-	if (rear_echo) {
-		rear_echo = false;
-		rear_distance = rear_echo_duration * 0.01716;
+		DEBUG_PRINT("\t"); DEBUG_PRINTLN(enc_count_M2 % 1000);
+		M2_interrupt = false;
 	}
 	
 	if (timer == true) {
 		timer = false;
 
-		if (front_distance < 200) {
-			DEBUG_PRINT(front_distance);
-		}
-		else {
-			DEBUG_PRINT("");
-		}
-		
-		DEBUG_PRINT("\t");
-		
-		if (rear_distance < 200) {
-			DEBUG_PRINTLN(rear_distance);
-		}
-		else {
-			DEBUG_PRINTLN("");
-		}
-	}
+		DEBUG_PRINT("\t"); DEBUG_PRINT("\t"); DEBUG_PRINT(front_distance);
+		DEBUG_PRINT("\t"); DEBUG_PRINTLN(rear_distance);
+	}*/
 }

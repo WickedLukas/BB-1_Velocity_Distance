@@ -28,24 +28,11 @@
 //volatile boolean M2_interrupt = false;
 //volatile boolean timer = false;
 
-volatile int16_t enc_count_M1 = 0;
-volatile int16_t enc_count_M2 = 0;
+volatile int16_t enc_count_M1 = 0;	// motor 1 encoder count
+volatile int16_t enc_count_M2 = 0;	// motor 2 encoder count
 
-volatile uint32_t front_echo_start;	// front echo start in microseconds
-volatile uint32_t front_echo_end;	// front echo end in microseconds
-volatile uint32_t front_echo_duration = 200000;	// front echo duration in microseconds
-
-volatile uint32_t rear_echo_start;	// rear echo start in microseconds
-volatile uint32_t rear_echo_end;	// rear echo end in microseconds
-volatile uint32_t rear_echo_duration = 200000;	// rear echo duration in microseconds
-
-volatile uint16_t trigger_time_count = 0;	// counter for TRIGGER_TIME_INTERVAL
-volatile uint8_t state = 1;	// state variable
-
-volatile uint8_t front_distance;	// distance to obstacle front in centimeter
-volatile uint8_t rear_distance;		// distance to obstacle rear in centimeter
-
-byte message[6];
+volatile uint8_t front_distance = 255;	// distance to obstacle front in centimeter
+volatile uint8_t rear_distance = 255;	// distance to obstacle rear in centimeter
 
 // stores which combination of current and previous encoder state lead to an increase or decrease of the encoder count and which are not defined
 const int8_t lookup_table[] = {0, 0, 0, 0, 0, -1, 1, 0, 0, 1, -1, 0, 0, 0, 0, 0};
@@ -65,20 +52,18 @@ const int8_t lookup_table[] = {0, 0, 0, 0, 0, -1, 1, 0, 0, 1, -1, 0, 0, 0, 0, 0}
 #endif
 
 void requestEvent() {
-	static uint8_t SREG_bak;
-	
-	SREG_bak = SREG;	//save global interrupt state
-	noInterrupts();
-	message[0] = (enc_count_M1 >> 8) & 0xFF;
-	message[1] = enc_count_M1 & 0xFF;
-	message[2] = (enc_count_M2 >> 8) & 0xFF;
-	message[3] = enc_count_M2 & 0xFF;
+	static byte message[6];
+		
+	message[0] = (enc_count_M1 >> 8) & 0xFF;	// most significant bits for motor 1 encoder count
+	message[1] = enc_count_M1 & 0xFF;			// least significant bits for motor 1 encoder count
+	message[2] = (enc_count_M2 >> 8) & 0xFF;	// most significant bits for motor 2 encoder count
+	message[3] = enc_count_M2 & 0xFF;			// least significant bits for motor 2 encoder count
 	message[4] = front_distance;
 	message[5] = rear_distance;
-	SREG = SREG_bak; 	//restore interrupt state
 	
 	Wire.write(message, 6);
 	
+	// reset encoder count
 	enc_count_M1 = 0;
 	enc_count_M2 = 0;
 }
@@ -92,7 +77,7 @@ void encoder_isr_M1() {
 	// add the current encoder state (PIND stores the values of digital pins 0-7)
 	enc_state = (enc_state & 0b1010) | ((PIND & 0b10100) >> 2);
 	
-	// change encounter count according to encoder state
+	// update encoder count according to the encoder state
 	enc_count_M1 = enc_count_M1 + lookup_table[enc_state & 0b1111];
 	
 	//M1_interrupt = true;
@@ -107,37 +92,52 @@ void encoder_isr_M2() {
 	// add the current encoder state (PIND stores the values of digital pins 0-7)
 	enc_state = (enc_state & 0b1010) | ((PIND & 0b101000) >> 3);
 	
-	// change encounter count according to encoder state
+	// update encoder count according to the encoder state
 	enc_count_M2 = enc_count_M2 - lookup_table[enc_state & 0b1111];
 	
 	//M2_interrupt = true;
 }
 
+// rear HC-SR04
 ISR(PCINT0_vect) {
+	static uint32_t echo_start;	// rear echo start in microseconds
+	static uint32_t echo_end;	// rear echo end in microseconds
+	static uint16_t echo_duration;	// rear echo duration in microseconds
+	
 	switch (digitalRead(8)) {
 		case HIGH:	// echo pin change was a rising edge (start of echo pulse)
-			rear_echo_start = micros();
+			echo_start = micros();
 			break;
 		case LOW:	// echo pin change was a falling edge (end of echo pulse)
-			rear_echo_end = micros();
-			rear_echo_duration = rear_echo_end - rear_echo_start;	// calculate echo pulse duration
+			echo_end = micros();
+			echo_duration = constrain(echo_end - echo_start, 0, 14790);	// calculate echo pulse duration and constrain it to measure a maximum distance of 255 cm (255 * 58 = 14790)
+			rear_distance = echo_duration / 58;	// calculate rear distance
 			break;
 	}
 }
 
+// front HC-SR04
 ISR(PCINT2_vect) {
+	static uint32_t echo_start;	// echo start in microseconds
+	static uint32_t echo_end;	// echo end in microseconds
+	static uint16_t echo_duration;	// echo duration in microseconds
+	
 	switch (digitalRead(7)) {
 		case HIGH:	// echo pin change was a rising edge (start of echo pulse)
-			front_echo_start = micros();
+			echo_start = micros();
 			break;
 		case LOW:	// echo pin change was a falling edge (end of echo pulse)
-			front_echo_end = micros();
-			front_echo_duration = front_echo_end - front_echo_start;	// calculate echo pulse duration
+			echo_end = micros();
+			echo_duration = constrain(echo_end - echo_start, 0, 14790);	// calculate echo pulse duration and constrain it to measure a maximum distance of 255 cm (255 * 58 = 14790)
+			front_distance = echo_duration / 58;	// calculate front distance
 			break;
 	}
 }
 
 void timer_isr() {
+	static uint16_t trigger_time_count = 0;	// counter for TRIGGER_TIME_INTERVAL
+	static uint8_t state = 1;	// state variable
+	
 	if (++trigger_time_count >= TRIGGER_TIME_INTERVAL) {
 		trigger_time_count = 0;	// reset trigger_time_count
 		state = 1;
@@ -170,12 +170,14 @@ void setup() {
 	while (!Serial); // wait for Leonardo eNUMeration, others continue immediately
 	#endif
 	
-	pinMode(2, INPUT);
-	pinMode(3, INPUT);
+	// prepare encoder pins
+	pinMode(2, INPUT);	// interrupt pin for encoder M1
+	pinMode(3, INPUT);	// interrupt pin for encoder M2
+		
+	attachInterrupt(digitalPinToInterrupt(2), encoder_isr_M1, CHANGE);	// attach interrupt service routine encoder_isr_M1 to encoder M1 interrupt pin
+	attachInterrupt(digitalPinToInterrupt(3), encoder_isr_M2, CHANGE);	// attach interrupt service routine encoder_isr_M2 to encoder M2 interrupt pin
 	
-	attachInterrupt(digitalPinToInterrupt(2),encoder_isr_M1,CHANGE);
-	attachInterrupt(digitalPinToInterrupt(3),encoder_isr_M2,CHANGE);
-	
+	// prepare HC-SR04 pins
 	pinMode(HCSR04_TRIGGER_PIN, OUTPUT);	// configure trigger pin as output
 	digitalWrite(HCSR04_TRIGGER_PIN, LOW);	// set trigger pin to low
 	
@@ -186,19 +188,16 @@ void setup() {
 	
 	noInterrupts();
 	PCICR |= (1 << PCIE0) | (1 << PCIE2); // interrupts from B and D
-
-	PCMSK0 |= (1 << PB0); // bit 0 on B (pin 8) will interrupt
-	PCMSK2 |= (1 << PD7); // bit 7 on D (pin 7) will interrupt
+	
+	PCMSK0 |= (1 << PB0); // bit 0 on B (digital pin 8) will interrupt
+	PCMSK2 |= (1 << PD7); // bit 7 on D (digital pin 7) will interrupt
 	interrupts();
-
+	
 	Timer1.initialize(TRIGGER_TIME);	// initialize timer 1
 	Timer1.attachInterrupt(timer_isr);	// attach interrupt service routine timer_isr to timer 1
 }
 
 void loop() {
-	front_distance = constrain((int) (front_echo_duration * 0.01716 + 0.5), 0, 255);
-	rear_distance = constrain((int) (rear_echo_duration * 0.01716 + 0.5), 0, 255);
-	
 	/*if (M1_interrupt) {
 		DEBUG_PRINTLN(enc_count_M1 % 1000);
 		M1_interrupt = false;

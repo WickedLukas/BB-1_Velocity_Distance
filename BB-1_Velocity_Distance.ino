@@ -174,7 +174,7 @@ void setup() {
 	// prepare encoder pins
 	pinMode(2, INPUT);	// interrupt pin for encoder M1
 	pinMode(3, INPUT);	// interrupt pin for encoder M2
-		
+	
 	attachInterrupt(digitalPinToInterrupt(2), enc_isr_M1, CHANGE);	// attach interrupt service routine enc_isr_M1 to encoder M1 interrupt pin
 	attachInterrupt(digitalPinToInterrupt(3), enc_isr_M2, CHANGE);	// attach interrupt service routine enc_isr_M2 to encoder M2 interrupt pin
 	

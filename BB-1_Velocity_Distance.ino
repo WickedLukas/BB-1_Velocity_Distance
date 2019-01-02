@@ -27,8 +27,8 @@
 //volatile boolean enc_M1_interrupt = false;
 //volatile boolean enc_M2_interrupt = false;
 
-volatile int16_t enc_count_M1 = 0;	// motor 1 encoder count
-volatile int16_t enc_count_M2 = 0;	// motor 2 encoder count
+volatile int8_t enc_count_M1 = 0;	// motor 1 encoder count
+volatile int8_t enc_count_M2 = 0;	// motor 2 encoder count
 
 volatile boolean front_meas = false;	// stores if a new measurement is available for front HC-SR04
 volatile boolean rear_meas = false;		// stores if a new measurement is available for rear HC-SR04
@@ -57,16 +57,14 @@ const int8_t lookup_table[] = {0, 0, 0, 0, 0, -1, 1, 0, 0, 1, -1, 0, 0, 0, 0, 0}
 #endif
 
 void requestEvent() {
-	static byte message[6];
+	static byte message[4];
 	
-	message[0] = (enc_count_M1 >> 8) & 0xFF;	// most significant bits for motor 1 encoder count
-	message[1] = enc_count_M1 & 0xFF;			// least significant bits for motor 1 encoder count
-	message[2] = (enc_count_M2 >> 8) & 0xFF;	// most significant bits for motor 2 encoder count
-	message[3] = enc_count_M2 & 0xFF;			// least significant bits for motor 2 encoder count
-	message[4] = front_distance;
-	message[5] = rear_distance;
+	message[0] = enc_count_M1;
+	message[1] = enc_count_M2;
+	message[2] = front_distance;
+	message[3] = rear_distance;
 	
-	Wire.write(message, 6);
+	Wire.write(message, 4);
 	
 	// reset encoder count
 	enc_count_M1 = 0;
@@ -216,12 +214,12 @@ void loop() {
 	}
 	
 	/*if (enc_M1_interrupt) {
-		DEBUG_PRINTLN(enc_count_M1 % 1000);
+		DEBUG_PRINTLN(enc_count_M1);
 		enc_M1_interrupt = false;
 	}
 	
 	if (enc_M2_interrupt) {
-		DEBUG_PRINT("\t"); DEBUG_PRINTLN(enc_count_M2 % 1000);
+		DEBUG_PRINT("\t"); DEBUG_PRINTLN(enc_count_M2);
 		enc_M2_interrupt = false;
 	}*/
 }

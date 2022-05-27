@@ -13,7 +13,8 @@
 *
 */
 
-#include "Arduino.h"
+#include <Arduino.h>
+
 #include "Wire.h"
 #include "TimerOne.h"
 
